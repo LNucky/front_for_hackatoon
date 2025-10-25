@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Планировщик выездов — загрузка файла</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root { --bg:#0f1220; --card:#171a2b; --muted:#9aa3b2; --accent:#5ac8fa; --ok:#2ecc71; --err:#ff6b6b; }
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:#e8ecf3}
+    .wrap{max-width:980px;margin:40px auto;padding:0 20px}
+    .card{background:var(--card);border:1px solid #262a40;border-radius:14px;padding:20px}
+    h1{font-size:22px;margin:0 0 12px} p{color:var(--muted);margin:6px 0 14px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    @media (max-width:860px){.grid{grid-template-columns:1fr}}
+    .drop{border:2px dashed #2c3150;border-radius:12px;padding:22px;text-align:center;transition:.2s}
+    .drop.drag{background:#12152a;border-color:var(--accent)}
+    .drop input{display:none}
+    .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+    button{background:var(--accent);color:#001421;border:0;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer}
+    button[disabled]{opacity:.6;cursor:not-allowed}
+    .mutebtn{background:#2c3150;color:#d7def0}
+    .small{font-size:12px;color:var(--muted)}
+    .tag{display:inline-block;background:#222642;padding:2px 8px;border-radius:999px;font-size:12px;margin-right:6px}
+    .log{background:#0b0e1c;border:1px solid #1f2440;border-radius:10px;padding:12px;min-height:60px;white-space:pre-wrap}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{border-bottom:1px solid #242840;padding:8px 10px;text-align:left;font-size:14px}
+    th{color:#cfd6ea}
+    .ok{color:var(--ok)} .err{color:var(--err)}
+    .switch{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+    .pill{display:inline-flex;gap:8px;align-items:center;background:#12152a;border:1px solid #242840;padding:6px 10px;border-radius:999px}
+    .hidden{display:none}
+    .spinner{width:18px;height:18px;border:3px solid #2c3150;border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .jsonbox{background:#0b0e1c;border:1px solid #1f2440;border-radius:10px;padding:12px;max-height:280px;overflow:auto;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}
+    .input{background:#12152a;border:1px solid #242840;border-radius:8px;padding:8px 10px;color:#d7def0;min-width:260px}
+    .warn{background:#2c1520;border:1px solid #5a2a3a;color:#ffd7d7;border-radius:10px;padding:8px 10px;font-size:12px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Планировщик выездов — загрузка списка адресов</h1>
+    <p>Загрузите <b>XLSX</b> или <b>CSV</b> — получим маршрут и метрики.</p>
+
+    <div class="grid">
+      <div class="card">
+        <div id="drop" class="drop" tabindex="0" aria-label="Перетащите файл сюда или выберите его">
+          <input id="file" type="file" accept=".xlsx,.csv" />
+          <div><strong>Перетащите сюда файл</strong> или <label for="file" style="color:var(--accent);cursor:pointer;text-decoration:underline">выберите</label></div>
+          <div class="small">Поддерживаются: .xlsx, .csv (до 10 МБ)</div>
+          <div id="picked" class="small" style="margin-top:8px"></div>
+        </div>
+
+        <div class="switch" style="gap:12px">
+          <label class="pill"><input type="checkbox" id="mock" /> Mock Mode</label>
+          <input id="apiBase" class="input" placeholder="http://localhost:8000" />
+          <span class="small">— адрес бэкенда</span>
+        </div>
+        <div id="httpsWarn" class="warn hidden" style="margin-top:8px">
+          Страница открыта по HTTPS, а адрес бэкенда — HTTP. Браузер заблокирует запрос
+          (mixed content). Используйте HTTPS-адрес бэкенда (например, через ngrok).
+        </div>
+
+        <div class="btnrow">
+          <button id="send">Отправить</button>
+          <button id="clear" class="mutebtn" type="button">Очистить</button>
+          <div id="busy" class="pill hidden"><div class="spinner"></div><span>Обработка…</span></div>
+        </div>
+
+        <div id="log" class="log" aria-live="polite"></div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div>
+            <span class="tag">Результат</span>
+            <span id="status" class="small"></span>
+          </div>
+          <div class="btnrow">
+            <button id="downloadCsv" class="mutebtn" disabled>Скачать CSV</button>
+          </div>
+        </div>
+        <div id="summary"></div>
+        <div id="tableWrap"></div>
+        <details style="margin-top:10px">
+          <summary class="small">Показать сырой JSON</summary>
+          <pre id="raw" class="jsonbox"></pre>
+        </details>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // --- элементы
+  const fileInput = document.getElementById('file');
+  const drop = document.getElementById('drop');
+  const picked = document.getElementById('picked');
+  const sendBtn = document.getElementById('send');
+  const clearBtn = document.getElementById('clear');
+  const mockChk = document.getElementById('mock');
+  const apiBaseInput = document.getElementById('apiBase');
+  const httpsWarn = document.getElementById('httpsWarn');
+  const busy = document.getElementById('busy');
+  const log = document.getElementById('log');
+  const statusEl = document.getElementById('status');
+  const summaryEl = document.getElementById('summary');
+  const tableWrap = document.getElementById('tableWrap');
+  const raw = document.getElementById('raw');
+  const dlCsv = document.getElementById('downloadCsv');
+
+  // --- init
+  mockChk.checked = false; // по умолчанию шлём на бэк
+  apiBaseInput.value = localStorage.getItem('apiBase') || 'http://localhost:8000';
+  apiBaseInput.addEventListener('change', () => {
+    localStorage.setItem('apiBase', apiBaseInput.value.trim());
+    checkHttpsMixed();
+  });
+  checkHttpsMixed();
+
+  let currentJson = null;
+
+  const fmtMin = m => `${Math.round(m)} мин`;
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const bytes = n => n<1024?`${n} B`:n<1024**2?`${(n/1024).toFixed(1)} KB`:`${(n/1024**2).toFixed(1)} MB`;
+
+  function checkHttpsMixed(){
+    const base = (apiBaseInput.value || '').trim();
+    const mixed = location.protocol === 'https:' && /^http:\/\//i.test(base);
+    httpsWarn.classList.toggle('hidden', !mixed);
+  }
+
+  function setBusy(v){
+    busy.classList.toggle('hidden', !v);
+    sendBtn.disabled = v;
+    clearBtn.disabled = v;
+  }
+
+  function setFileInfo(f){
+    picked.innerHTML = f ? `Файл: <b>${esc(f.name)}</b> • ${bytes(f.size)}` : '';
+  }
+
+  function logLine(text, good=null){
+    const m = document.createElement('div');
+    if(good === true) m.className = 'ok';
+    if(good === false) m.className = 'err';
+    m.textContent = text;
+    log.appendChild(m);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // Drag & drop
+  ;['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev, e=>{e.preventDefault();drop.classList.add('drag')}))
+  ;['dragleave','drop'].forEach(ev=>drop.addEventListener(ev, e=>{e.preventDefault();drop.classList.remove('drag')}))
+  drop.addEventListener('drop', e=>{
+    const f = e.dataTransfer.files?.[0];
+    if(f) { fileInput.files = e.dataTransfer.files; setFileInfo(f); }
+  });
+  drop.addEventListener('click', ()=> fileInput.click());
+  fileInput.addEventListener('change', ()=> setFileInfo(fileInput.files?.[0]));
+
+  clearBtn.addEventListener('click', ()=>{
+    fileInput.value = '';
+    setFileInfo(null);
+    log.textContent = '';
+    statusEl.textContent = '';
+    summaryEl.innerHTML = '';
+    tableWrap.innerHTML = '';
+    raw.textContent = '';
+    currentJson = null;
+    dlCsv.disabled = true;
+  });
+
+  sendBtn.addEventListener('click', async ()=>{
+    log.textContent = '';
+    summaryEl.innerHTML = '';
+    tableWrap.innerHTML = '';
+    raw.textContent = '';
+    statusEl.textContent = '';
+    dlCsv.disabled = true;
+    currentJson = null;
+
+    const f = fileInput.files?.[0];
+    if(!f){ logLine('Выберите файл.', false); return; }
+    if(!/\.(xlsx|csv)$/i.test(f.name)){ logLine('Поддерживаются только .xlsx или .csv', false); return; }
+    if(f.size > 10*1024*1024){ logLine('Файл больше 10 МБ.', false); return; }
+
+    try{
+      setBusy(true);
+      const base = (apiBaseInput.value || 'http://localhost:8000').replace(/\/$/, '');
+      if(!mockChk.checked){
+        if(location.protocol === 'https:' && /^http:\/\//i.test(base)){
+          throw new Error('Страница https:// и бэкенд http:// — браузер заблокирует запрос. Используйте HTTPS-адрес бэкенда (ngrok).');
+        }
+      }
+      logLine(mockChk.checked ? 'Mock Mode: генерирую тестовый результат…' : `Отправляю файл на ${base}/api/optimize …`);
+
+      let data;
+      if(mockChk.checked){
+        data = mockResult();
+      } else {
+        const fd = new FormData();
+        fd.append('file', f);
+        const res = await fetch(`${base}/api/optimize`, { method:'POST', body:fd });
+        if(!res.ok){
+          const text = await res.text().catch(()=> '');
+          throw new Error(`HTTP ${res.status}${text ? ' — '+text : ''}`);
+        }
+        data = await res.json();
+      }
+
+      currentJson = data;
+      renderResult(data);
+      raw.textContent = JSON.stringify(data, null, 2);
+      dlCsv.disabled = !Array.isArray(data?.route) || data.route.length===0;
+      logLine('Готово ✅', true);
+    } catch(err){
+      console.error(err);
+      logLine('Ошибка: ' + (err?.message || err), false);
+    } finally {
+      setBusy(false);
+    }
+  });
+
+  function renderResult(data){
+    const s = data?.summary || {};
+    statusEl.textContent = 'Статус: ok';
+    summaryEl.innerHTML = `
+      <div class="pill">Визитов: <b>${esc(s.visits ?? (data?.route?.length || 0))}</b></div>
+      <div class="pill">Время в пути: <b>${fmtMin(s.total_time_min ?? 0)}</b></div>
+      <div class="pill">Без опозданий: <b>${esc(s.on_time ?? '-')}</b></div>
+      <div class="pill">Опоздания: <b>${esc(s.late ?? '-')}</b></div>
+      <div class="pill">Штраф: <b>${esc(s.late_penalty ?? 0)}</b></div>
+    `;
+
+    const rows = Array.isArray(data?.route) ? data.route : [];
+    if(rows.length){
+      const head = ['#','Клиент','Адрес','ETA','Окно','Опоздание (мин)','Сервис (мин)'];
+      const tr = r => `
+        <tr>
+          <td>${esc(r.id ?? '')}</td>
+          <td>${esc(r.client ?? '')}</td>
+          <td>${esc(r.address ?? '')}</td>
+          <td>${esc(fmtTime(r.eta))}</td>
+          <td>${esc(fmtWindow(r.window_start, r.window_end))}</td>
+          <td>${esc(r.late_minutes ?? 0)}</td>
+          <td>${esc(r.service_min ?? 0)}</td>
+        </tr>`;
+      tableWrap.innerHTML = `
+        <table>
+          <thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+          <tbody>${rows.map(tr).join('')}</tbody>
+        </table>`;
+    } else {
+      tableWrap.innerHTML = '<div class="small">Маршрут пуст или не распознан.</div>';
+    }
+  }
+
+  function fmtTime(s){
+    if(!s) return '';
+    try{ const d = new Date(s); return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }catch{ return s; }
+  }
+  function fmtWindow(a,b){
+    const f = x => x ? fmtTime(x) : '';
+    return [f(a), f(b)].filter(Boolean).join(' — ');
+  }
+
+  // CSV выгрузка
+  dlCsv.addEventListener('click', ()=>{
+    if(!currentJson?.route?.length) return;
+    const rows = currentJson.route;
+    const cols = ['id','client','address','lat','lon','window_start','window_end','service_min','eta','late_minutes'];
+    const header = cols.join(',');
+    const escCsv = v => {
+      const s = String(v ?? '');
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+    };
+    const lines = rows.map(r => cols.map(c => escCsv(r[c])).join(','));
+    const csv = [header, ...lines].join('\n');
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'route_export.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  // Мок-ответ
+  function mockResult(){
+    const now = new Date();
+    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 0, 0);
+    const n = 8;
+    const route = Array.from({length:n}, (_,i)=>({
+      id: i+1,
+      client: `Клиент ${i+1}`,
+      address: `Город, Улица ${i+1}, д. ${10+i}`,
+      lat: 47.220 + i*0.002,
+      lon: 39.710 + i*0.003,
+      window_start: new Date(base.getTime() + i*45*60000).toISOString(),
+      window_end:   new Date(base.getTime() + (i*45+60)*60000).toISOString(),
+      service_min: 15 + (i%3)*5,
+      eta:         new Date(base.getTime() + i*40*60000).toISOString(),
+      late_minutes: Math.max(0, i*40 - i*45)
+    }));
+    return {
+      summary: {
+        total_time_min: route.length ? route.length*35 : 0,
+        visits: route.length,
+        on_time: route.filter(r=>r.late_minutes<=0).length,
+        late: route.filter(r=>r.late_minutes>0).length,
+        late_penalty: route.reduce((a,r)=>a + Math.max(0,r.late_minutes-5),0)
+      },
+      route
+    };
+  }
+})();
+</script>
+</body>
+</html>
