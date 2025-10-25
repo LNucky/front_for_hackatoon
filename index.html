@@ -2,26 +2,29 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <title>Планировщик выездов — загрузка файла</title>
+  <title>Планировщик выездов — Яндекс (строгий режим)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <!-- База v3 (для совместимости со страницей) -->
+  <script src="https://api-maps.yandex.ru/v3/?lang=ru_RU"></script>
+  <!-- XLSX парсер -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     :root { --bg:#0f1220; --card:#171a2b; --muted:#9aa3b2; --accent:#5ac8fa; --ok:#2ecc71; --err:#ff6b6b; }
     *{box-sizing:border-box} body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:#e8ecf3}
-    .wrap{max-width:980px;margin:40px auto;padding:0 20px}
+    .wrap{max-width:1000px;margin:40px auto;padding:0 20px}
     .card{background:var(--card);border:1px solid #262a40;border-radius:14px;padding:20px}
     h1{font-size:22px;margin:0 0 12px} p{color:var(--muted);margin:6px 0 14px}
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-    @media (max-width:860px){.grid{grid-template-columns:1fr}}
-    .drop{border:2px dashed #2c3150;border-radius:12px;padding:22px;text-align:center;transition:.2s}
-    .drop.drag{background:#12152a;border-color:var(--accent)}
+    @media (max-width:900px){.grid{grid-template-columns:1fr}}
+    .drop{border:2px dashed #2c3150;border-radius:12px;padding:22px;text-align:center}
     .drop input{display:none}
     .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
     button{background:var(--accent);color:#001421;border:0;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer}
     button[disabled]{opacity:.6;cursor:not-allowed}
     .mutebtn{background:#2c3150;color:#d7def0}
-    .small{font-size:12px;color:var(--muted)}
+    .small{font-size:12px;color:#9aa3b2}
     .tag{display:inline-block;background:#222642;padding:2px 8px;border-radius:999px;font-size:12px;margin-right:6px}
-    .log{background:#0b0e1c;border:1px solid #1f2440;border-radius:10px;padding:12px;min-height:60px;white-space:pre-wrap}
+    .log{background:#0b0e1c;border:1px solid #1f2440;border-radius:10px;padding:12px;min-height:68px;white-space:pre-wrap}
     table{width:100%;border-collapse:collapse;margin-top:10px}
     th,td{border-bottom:1px solid #242840;padding:8px 10px;text-align:left;font-size:14px}
     th{color:#cfd6ea}
@@ -31,19 +34,19 @@
     .hidden{display:none}
     .spinner{width:18px;height:18px;border:3px solid #2c3150;border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
-    .jsonbox{background:#0b0e1c;border:1px solid #1f2440;border-radius:10px;padding:12px;max-height:280px;overflow:auto;font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;font-size:12px}
-    .input{background:#12152a;border:1px solid #242840;border-radius:8px;padding:8px 10px;color:#d7def0;min-width:260px}
+    .jsonbox{background:#0b0e1c;border:1px solid #1f2440;border-radius:10px;padding:12px;max-height:280px;overflow:auto;font-family:ui-monospace, Menlo, Consolas, monospace;font-size:12px}
+    .input{background:#12152a;border:1px solid #242840;border-radius:8px;padding:8px 10px;color:#d7def0;min-width:230px}
     .warn{background:#2c1520;border:1px solid #5a2a3a;color:#ffd7d7;border-radius:10px;padding:8px 10px;font-size:12px}
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Планировщик выездов — загрузка списка адресов</h1>
-    <p>Загрузите <b>XLSX</b> или <b>CSV</b> — получим маршрут и метрики.</p>
+    <p>Все длительности считаются <b>только через Яндекс</b> (с пробками). Два режима: «Матрица (TSP)» и «Ближайший сосед (онлайн)».</p>
 
     <div class="grid">
       <div class="card">
-        <div id="drop" class="drop" tabindex="0" aria-label="Перетащите файл сюда или выберите его">
+        <div class="drop">
           <input id="file" type="file" accept=".xlsx,.csv" />
           <div><strong>Перетащите сюда файл</strong> или <label for="file" style="color:var(--accent);cursor:pointer;text-decoration:underline">выберите</label></div>
           <div class="small">Поддерживаются: .xlsx, .csv (до 10 МБ)</div>
@@ -51,13 +54,32 @@
         </div>
 
         <div class="switch" style="gap:12px">
-          <label class="pill"><input type="checkbox" id="mock" /> Mock Mode</label>
-          <input id="apiBase" class="input" placeholder="http://localhost:8000" />
+          <span class="small">Алгоритм:</span>
+          <label class="pill"><input type="radio" name="algo" value="matrix" checked /> Матрица (TSP)</label>
+          <label class="pill"><input type="radio" name="algo" value="nn" /> Ближайший сосед (онлайн)</label>
+        </div>
+
+        <div class="switch" style="gap:12px">
+          <input id="apiKey" class="input" placeholder="Yandex API key" />
+          <span class="small">— API ключ (JS/Геокодер)</span>
+        </div>
+
+        <div class="switch" style="gap:12px">
+          <input id="apiBase" class="input" placeholder="https://localhost:8000" />
           <span class="small">— адрес бэкенда</span>
         </div>
+
+        <div class="switch" style="gap:12px">
+          <input id="startTime" class="input" value="09:00" />
+          <span class="small">— старт (HH:MM)</span>
+          <input id="maxPoints" class="input" type="number" value="12" min="2" max="100" style="width:110px" />
+          <span class="small">— макс. точек</span>
+          <input id="kCand" class="input" type="number" value="8" min="2" max="30" style="width:110px" />
+          <span class="small">— k ближайших (онлайн)</span>
+        </div>
+
         <div id="httpsWarn" class="warn hidden" style="margin-top:8px">
-          Страница открыта по HTTPS, а адрес бэкенда — HTTP. Браузер заблокирует запрос
-          (mixed content). Используйте HTTPS-адрес бэкенда (например, через ngrok).
+          Страница по HTTPS, а бэкенд по HTTP — браузер заблокирует запрос.
         </div>
 
         <div class="btnrow">
@@ -71,13 +93,8 @@
 
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <div>
-            <span class="tag">Результат</span>
-            <span id="status" class="small"></span>
-          </div>
-          <div class="btnrow">
-            <button id="downloadCsv" class="mutebtn" disabled>Скачать CSV</button>
-          </div>
+          <div><span class="tag">Результат</span> <span id="status" class="small"></span></div>
+          <div class="btnrow"><button id="downloadCsv" class="mutebtn" disabled>Скачать CSV</button></div>
         </div>
         <div id="summary"></div>
         <div id="tableWrap"></div>
@@ -91,14 +108,17 @@
 
 <script>
 (() => {
-  // --- элементы
+  // ── элементы
   const fileInput = document.getElementById('file');
-  const drop = document.getElementById('drop');
   const picked = document.getElementById('picked');
   const sendBtn = document.getElementById('send');
   const clearBtn = document.getElementById('clear');
-  const mockChk = document.getElementById('mock');
+  const apiKeyInput = document.getElementById('apiKey');
   const apiBaseInput = document.getElementById('apiBase');
+  const startInput = document.getElementById('startTime');
+  const maxPointsInput = document.getElementById('maxPoints');
+  const kCandInput = document.getElementById('kCand');
+  const algoRadios = [...document.querySelectorAll('input[name="algo"]')];
   const httpsWarn = document.getElementById('httpsWarn');
   const busy = document.getElementById('busy');
   const log = document.getElementById('log');
@@ -108,76 +128,30 @@
   const raw = document.getElementById('raw');
   const dlCsv = document.getElementById('downloadCsv');
 
-  // --- init
-  mockChk.checked = false; // по умолчанию шлём на бэк
-  apiBaseInput.value = localStorage.getItem('apiBase') || 'http://localhost:8000';
-  apiBaseInput.addEventListener('change', () => {
-    localStorage.setItem('apiBase', apiBaseInput.value.trim());
-    checkHttpsMixed();
-  });
+  // ── init
+  apiBaseInput.value = localStorage.getItem('apiBase') || 'https://localhost:8000';
+  apiBaseInput.addEventListener('change', () => { localStorage.setItem('apiBase', apiBaseInput.value.trim()); checkHttpsMixed(); });
+  apiKeyInput.value  = localStorage.getItem('yKey')   || '58c38b72-57f7-4946-bc13-a256d341281a';
+  apiKeyInput.addEventListener('change', () => localStorage.setItem('yKey', apiKeyInput.value.trim()));
+  function checkHttpsMixed(){ const base=(apiBaseInput.value||'').trim(); const mixed=location.protocol==='https:' && /^http:\/\//i.test(base); httpsWarn.classList.toggle('hidden', !mixed); }
   checkHttpsMixed();
 
   let currentJson = null;
 
+  // ── утилиты
   const fmtMin = m => `${Math.round(m)} мин`;
   const esc = s => String(s ?? '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   const bytes = n => n<1024?`${n} B`:n<1024**2?`${(n/1024).toFixed(1)} KB`:`${(n/1024**2).toFixed(1)} MB`;
-
-  function checkHttpsMixed(){
-    const base = (apiBaseInput.value || '').trim();
-    const mixed = location.protocol === 'https:' && /^http:\/\//i.test(base);
-    httpsWarn.classList.toggle('hidden', !mixed);
-  }
-
-  function setBusy(v){
-    busy.classList.toggle('hidden', !v);
-    sendBtn.disabled = v;
-    clearBtn.disabled = v;
-  }
-
-  function setFileInfo(f){
-    picked.innerHTML = f ? `Файл: <b>${esc(f.name)}</b> • ${bytes(f.size)}` : '';
-  }
-
-  function logLine(text, good=null){
-    const m = document.createElement('div');
-    if(good === true) m.className = 'ok';
-    if(good === false) m.className = 'err';
-    m.textContent = text;
-    log.appendChild(m);
-    log.scrollTop = log.scrollHeight;
-  }
-
-  // Drag & drop
-  ;['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev, e=>{e.preventDefault();drop.classList.add('drag')}))
-  ;['dragleave','drop'].forEach(ev=>drop.addEventListener(ev, e=>{e.preventDefault();drop.classList.remove('drag')}))
-  drop.addEventListener('drop', e=>{
-    const f = e.dataTransfer.files?.[0];
-    if(f) { fileInput.files = e.dataTransfer.files; setFileInfo(f); }
-  });
-  drop.addEventListener('click', ()=> fileInput.click());
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  function logLine(t, good=null){ const m=document.createElement('div'); if(good===true)m.className='ok'; if(good===false)m.className='err'; m.textContent=t; log.appendChild(m); log.scrollTop=log.scrollHeight; }
+  function setBusy(v){ busy.classList.toggle('hidden', !v); sendBtn.disabled=v; clearBtn.disabled=v; }
+  function setFileInfo(f){ picked.innerHTML = f ? `Файл: <b>${esc(f.name)}</b> • ${bytes(f.size)}` : ''; }
   fileInput.addEventListener('change', ()=> setFileInfo(fileInput.files?.[0]));
+  clearBtn.addEventListener('click', ()=>{ fileInput.value=''; setFileInfo(null); log.textContent=''; statusEl.textContent=''; summaryEl.innerHTML=''; tableWrap.innerHTML=''; raw.textContent=''; currentJson=null; dlCsv.disabled=true; });
 
-  clearBtn.addEventListener('click', ()=>{
-    fileInput.value = '';
-    setFileInfo(null);
-    log.textContent = '';
-    statusEl.textContent = '';
-    summaryEl.innerHTML = '';
-    tableWrap.innerHTML = '';
-    raw.textContent = '';
-    currentJson = null;
-    dlCsv.disabled = true;
-  });
-
+  // ── кнопка
   sendBtn.addEventListener('click', async ()=>{
-    log.textContent = '';
-    summaryEl.innerHTML = '';
-    tableWrap.innerHTML = '';
-    raw.textContent = '';
-    statusEl.textContent = '';
-    dlCsv.disabled = true;
-    currentJson = null;
+    log.textContent=''; summaryEl.innerHTML=''; tableWrap.innerHTML=''; raw.textContent=''; statusEl.textContent=''; dlCsv.disabled=true; currentJson=null;
 
     const f = fileInput.files?.[0];
     if(!f){ logLine('Выберите файл.', false); return; }
@@ -186,51 +160,65 @@
 
     try{
       setBusy(true);
-      const base = (apiBaseInput.value || 'http://localhost:8000').replace(/\/$/, '');
-      if(!mockChk.checked){
-        if(location.protocol === 'https:' && /^http:\/\//i.test(base)){
-          throw new Error('Страница https:// и бэкенд http:// — браузер заблокирует запрос. Используйте HTTPS-адрес бэкенда (ngrok).');
-        }
-      }
-      logLine(mockChk.checked ? 'Mock Mode: генерирую тестовый результат…' : `Отправляю файл на ${base}/api/optimize …`);
+      const base = (apiBaseInput.value || 'https://localhost:8000').replace(/\/$/, '');
+      if(location.protocol==='https:' && /^http:\/\//i.test(base)) throw new Error('Страница https:// и бэкенд http:// — браузер заблокирует запрос.');
 
-      let data;
-      if(mockChk.checked){
-        data = mockResult();
+      const points = await parseFileToPoints(f, Number(maxPointsInput.value||12));
+      if(points.length<2) throw new Error('Недостаточно точек (нужно ≥ 2).');
+
+      await ensureYandex2_1Loaded(apiKeyInput.value.trim()); // строго Яндекс
+
+      const algo = algoRadios.find(r=>r.checked)?.value || 'matrix';
+      if(algo==='nn'){
+        logLine('Строю маршрут по ближайшим (строго Яндекс)…');
+        const step = await buildRouteNearestNeighborStrict(points, { k:Number(kCandInput.value||8) });
+        logLine('Отправляю на /api/optimize_with_chain …');
+        const resp = await fetch(`${base}/api/optimize_with_chain`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ points: step.orderedPoints, legs_sec: step.legsSec, start_time: (startInput.value||'09:00') })
+        });
+        if(!resp.ok) throw new Error(`HTTP ${resp.status} — ${await resp.text()}`);
+        const data = await resp.json(); afterData(data);
       } else {
-        const fd = new FormData();
-        fd.append('file', f);
-        const res = await fetch(`${base}/api/optimize`, { method:'POST', body:fd });
-        if(!res.ok){
-          const text = await res.text().catch(()=> '');
-          throw new Error(`HTTP ${res.status}${text ? ' — '+text : ''}`);
-        }
-        data = await res.json();
+        logLine('Формирую матрицу A→B (строго Яндекс)…');
+        const M = await buildDurationMatrixStrict(points);
+        logLine('Отправляю на /api/optimize_with_matrix …');
+        const res = await fetch(`${base}/api/optimize_with_matrix`, {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ points, duration_matrix_sec: M, start_time: (startInput.value||'09:00'), start_index: 0 })
+        });
+        if(!res.ok) throw new Error(`HTTP ${res.status} — ${await res.text()}`);
+        const data = await res.json(); afterData(data);
       }
-
-      currentJson = data;
-      renderResult(data);
-      raw.textContent = JSON.stringify(data, null, 2);
-      dlCsv.disabled = !Array.isArray(data?.route) || data.route.length===0;
-      logLine('Готово ✅', true);
     } catch(err){
-      console.error(err);
-      logLine('Ошибка: ' + (err?.message || err), false);
-    } finally {
-      setBusy(false);
-    }
+      console.error(err); logLine('Ошибка: ' + (err?.message || err), false);
+    } finally { setBusy(false); }
   });
 
+  function afterData(data){
+    currentJson = data;
+    renderResult(data);
+    raw.textContent = JSON.stringify(data, null, 2);
+    dlCsv.disabled = !Array.isArray(data?.route) || data.route.length===0;
+    logLine('Готово ✅', true);
+  }
+
+  // ── визуализация
   function renderResult(data){
     const s = data?.summary || {};
     statusEl.textContent = 'Статус: ok';
-    summaryEl.innerHTML = `
-      <div class="pill">Визитов: <b>${esc(s.visits ?? (data?.route?.length || 0))}</b></div>
-      <div class="pill">Время в пути: <b>${fmtMin(s.total_time_min ?? 0)}</b></div>
-      <div class="pill">Без опозданий: <b>${esc(s.on_time ?? '-')}</b></div>
-      <div class="pill">Опоздания: <b>${esc(s.late ?? '-')}</b></div>
-      <div class="pill">Штраф: <b>${esc(s.late_penalty ?? 0)}</b></div>
-    `;
+    const pills = [];
+    if('drive_min' in s) pills.push(`<div class="pill">Движение: <b>${fmtMin(s.drive_min)}</b></div>`);
+    pills.push(`<div class="pill">Сервис: <b>${fmtMin(s.service_min ?? 0)}</b></div>`);
+    if('wait_min' in s) pills.push(`<div class="pill">Ожидание: <b>${fmtMin(s.wait_min)}</b></div>`);
+    pills.push(`<div class="pill">Итого: <b>${fmtMin(s.total_elapsed_min ?? (s.total_time_min||0))}</b></div>`);
+    pills.push(`<div class="pill">Визитов: <b>${esc(s.visits ?? (data?.route?.length || 0))}</b></div>`);
+    pills.push(`<div class="pill">Без опозданий: <b>${esc(s.on_time ?? '-')}</b></div>`);
+    pills.push(`<div class="pill">Опоздания: <b>${esc(s.late ?? '-')}</b></div>`);
+    pills.push(`<div class="pill">Штраф: <b>${esc(s.late_penalty ?? 0)}</b></div>`);
+    summaryEl.innerHTML = pills.join(' ');
 
     const rows = Array.isArray(data?.route) ? data.route : [];
     if(rows.length){
@@ -245,72 +233,225 @@
           <td>${esc(r.late_minutes ?? 0)}</td>
           <td>${esc(r.service_min ?? 0)}</td>
         </tr>`;
-      tableWrap.innerHTML = `
-        <table>
-          <thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
-          <tbody>${rows.map(tr).join('')}</tbody>
-        </table>`;
+      tableWrap.innerHTML = `<table>
+        <thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+        <tbody>${rows.map(tr).join('')}</tbody>
+      </table>`;
     } else {
-      tableWrap.innerHTML = '<div class="small">Маршрут пуст или не распознан.</div>';
+      tableWrap.innerHTML = '<div class="small">Маршрут пуст.</div>';
     }
   }
+  function fmtTime(s){ if(!s) return ''; try{ const d=new Date(s.replace('Z','')); return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }catch{ return s; } }
+  function fmtWindow(a,b){ const f=x=>x?fmtTime(x):''; return [f(a),f(b)].filter(Boolean).join(' — '); }
 
-  function fmtTime(s){
-    if(!s) return '';
-    try{ const d = new Date(s); return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }catch{ return s; }
-  }
-  function fmtWindow(a,b){
-    const f = x => x ? fmtTime(x) : '';
-    return [f(a), f(b)].filter(Boolean).join(' — ');
-  }
-
-  // CSV выгрузка
   dlCsv.addEventListener('click', ()=>{
     if(!currentJson?.route?.length) return;
     const rows = currentJson.route;
     const cols = ['id','client','address','lat','lon','window_start','window_end','service_min','eta','late_minutes'];
     const header = cols.join(',');
-    const escCsv = v => {
-      const s = String(v ?? '');
-      return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
-    };
+    const escCsv = v => { const s=String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
     const lines = rows.map(r => cols.map(c => escCsv(r[c])).join(','));
     const csv = [header, ...lines].join('\n');
-    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'route_export.csv';
-    a.click();
-    URL.revokeObjectURL(a.href);
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'}); const a=document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = 'route_export.csv'; a.click(); URL.revokeObjectURL(a.href);
   });
 
-  // Мок-ответ
-  function mockResult(){
-    const now = new Date();
-    const base = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 0, 0);
-    const n = 8;
-    const route = Array.from({length:n}, (_,i)=>({
-      id: i+1,
-      client: `Клиент ${i+1}`,
-      address: `Город, Улица ${i+1}, д. ${10+i}`,
-      lat: 47.220 + i*0.002,
-      lon: 39.710 + i*0.003,
-      window_start: new Date(base.getTime() + i*45*60000).toISOString(),
-      window_end:   new Date(base.getTime() + (i*45+60)*60000).toISOString(),
-      service_min: 15 + (i%3)*5,
-      eta:         new Date(base.getTime() + i*40*60000).toISOString(),
-      late_minutes: Math.max(0, i*40 - i*45)
-    }));
-    return {
-      summary: {
-        total_time_min: route.length ? route.length*35 : 0,
-        visits: route.length,
-        on_time: route.filter(r=>r.late_minutes<=0).length,
-        late: route.filter(r=>r.late_minutes>0).length,
-        late_penalty: route.reduce((a,r)=>a + Math.max(0,r.late_minutes-5),0)
-      },
-      route
-    };
+  // ── парсинг файла
+  async function parseFileToPoints(file, limit){
+    const buf = await file.arrayBuffer();
+    let rows = [];
+    if(/\.csv$/i.test(file.name)){
+      const text = new TextDecoder('utf-8').decode(new Uint8Array(buf));
+      rows = csvToObjects(text);
+    } else {
+      const wb = XLSX.read(buf, {type:'array'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+    }
+    const canon = canonicalizeRows(rows).slice(0, Math.max(2, limit||12));
+    if(!canon.length) throw new Error('Не удалось распознать строки с координатами.');
+    return canon;
+  }
+  function csvToObjects(text){
+    const lines = text.replace(/\r/g,'').split('\n').filter(Boolean);
+    if(!lines.length) return [];
+    const head = lines[0].split(',').map(s=>s.trim());
+    return lines.slice(1).map(line=>{
+      const cells = splitCsv(line);
+      const obj = {}; head.forEach((h,i)=>obj[h]=cells[i]??''); return obj;
+    });
+  }
+  function splitCsv(line){
+    const out=[]; let s=''; let q=false;
+    for(let i=0;i<line.length;i++){
+      const c=line[i];
+      if(c === '"' ){ if(q && line[i+1] === '"'){ s+='"'; i++; } else { q=!q; } }
+      else if(c===',' && !q){ out.push(s); s=''; }
+      else s+=c;
+    }
+    out.push(s); return out.map(x=>x.trim());
+  }
+
+  // ── канонизация
+  function canonicalizeRows(arr){
+    const map = (obj, keys)=>{ for(const k of keys){ if(k in obj && obj[k]!=='' && obj[k]!==null) return obj[k]; } return null; };
+    const out=[];
+    for(let i=0;i<arr.length;i++){
+      const r = arr[i]; const lower = {}; Object.keys(r).forEach(k=>lower[k.trim().toLowerCase()]=r[k]);
+      const get = (...alts)=>map(lower, alts.map(a=>a.toLowerCase()));
+      const toF = v => { if(v===null||v===undefined||v==='') return null; const s=String(v).replace(',','.'); const n=parseFloat(s); return Number.isFinite(n)?n:null; };
+
+      const rid = (()=>{ const v = get('номер объекта','id','номер'); const n = parseInt(String(v).split('.')[0]); return Number.isFinite(n)?n:(i+1); })();
+      const addr = String(get('адрес объекта','адрес','address') || '').trim();
+      let lat = toF(get('географическая широта','широта','lat','latitude'));
+      let lon = toF(get('географическая долгота','долгота','lon','lng','longitude'));
+      const ws = parseTime(get('время начала рабочего дня','окно начало','окно_начало','window_start'));
+      const we = parseTime(get('время окончания рабочего дня','окно конец','окно_конец','window_end'));
+      const lvl = String(get('уровень клиента','приоритет') || '').trim().toLowerCase();
+      const service = lvl==='vip' ? 25 : 20;
+      if(lat==null || lon==null){ continue; }
+      out.push({
+        id: rid, lat, lon, address: addr,
+        window_start: ws ? todayIso(ws) : null,
+        window_end:   we ? todayIso(we) : null,
+        service_min: service
+      });
+    }
+    return out;
+  }
+  function parseTime(s){
+    if(s==null) return null;
+    if(typeof s==='number'){ const m=Math.round(s*24*60), hh=Math.floor(m/60), mm=m%60; return `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`; }
+    s=String(s).trim().replace('.',':');
+    if(/^\d{3,4}$/.test(s)){ s=s.padStart(4,'0'); s=s.slice(0,2)+':'+s.slice(2); }
+    if(!/^\d{1,2}:\d{2}$/.test(s)) return null;
+    return s;
+  }
+  function todayIso(hhmm){
+    const [hh, mm] = String(hhmm).split(':').map(Number);
+    const d = new Date(); d.setHours(hh||0, mm||0, 0, 0);
+    const pad = n => String(n).padStart(2,'0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(hh||0)}:${pad(mm||0)}:00`; // без таймзоны
+  }
+
+  // ── Яндекс JS API 2.1 (строго)
+  let ymaps21Promise = null;
+  async function ensureYandex2_1Loaded(key){
+    if(window.ymaps && ymaps?.multiRouter) return;
+    if(!ymaps21Promise){
+      ymaps21Promise = new Promise((resolve, reject)=>{
+        const s = document.createElement('script');
+        s.src = `https://api-maps.yandex.ru/2.1/?lang=ru_RU&apikey=${encodeURIComponent(key||'')}`;
+        s.onload = ()=> ymaps.ready(resolve);
+        s.onerror = ()=> reject(new Error('Не удалось загрузить Yandex JS API 2.1'));
+        document.head.appendChild(s);
+      });
+    }
+    return ymaps21Promise;
+  }
+
+  // ── ОДИН MultiRoute + очередь + ретраи
+  let singleMR = null;       // общий экземпляр
+  let queue = Promise.resolve();
+  const MAX_RETRIES = 4;
+  const BASE_DELAY = 400;    // мс
+  const BETWEEN_CALLS = 220; // мс — мягкий QPS
+
+  function getDurationStrict(a, b){
+    // Все вызовы становятся в очередь, выполняются последовательно
+    queue = queue.then(()=> _calcWithRetries(a,b)).then(v=>{ return sleep(BETWEEN_CALLS).then(()=>v); });
+    return queue;
+  }
+
+  function _calcWithRetries(a,b,attempt=1){
+    return new Promise((resolve,reject)=>{
+      const doOnce = ()=>{
+        try{
+          if(!singleMR){
+            singleMR = new ymaps.multiRouter.MultiRoute(
+              { referencePoints: [[a.lat,a.lon],[b.lat,b.lon]], params:{ routingMode:'auto' } },
+              { boundsAutoApply:false }
+            );
+          } else {
+            singleMR.model.setReferencePoints([[a.lat,a.lon],[b.lat,b.lon]]);
+          }
+
+          const onSuccess = ()=>{
+            try{
+              const r = singleMR.getActiveRoute();
+              const sec = r?.properties?.get('durationInTraffic')?.value || r?.properties?.get('duration')?.value || 0;
+              if(sec > 0){ cleanup(); resolve(Number(sec)); }
+              else fail('empty-duration');
+            }catch(e){ fail('no-active-route'); }
+          };
+          const onFail = ()=> fail('requestfail');
+
+          function fail(code){
+            cleanup();
+            if(attempt < MAX_RETRIES){
+              const delay = BASE_DELAY * Math.pow(2, attempt-1);
+              // повторим с задержкой (экспоненциальной)
+              setTimeout(()=>{
+                _calcWithRetries(a,b,attempt+1).then(resolve).catch(reject);
+              }, delay);
+            }else{
+              reject(new Error(`Яндекс не вернул маршрут (${code}) после ${MAX_RETRIES} попыток`));
+            }
+          }
+          function cleanup(){
+            singleMR.model.events.remove('requestsuccess', onSuccess);
+            singleMR.model.events.remove('requestfail', onFail);
+          }
+
+          singleMR.model.events.add('requestsuccess', onSuccess);
+          singleMR.model.events.add('requestfail', onFail);
+        }catch(err){
+          if(attempt < MAX_RETRIES){
+            setTimeout(()=> _calcWithRetries(a,b,attempt+1).then(resolve).catch(reject), BASE_DELAY*Math.pow(2,attempt-1));
+          } else reject(err);
+        }
+      };
+      doOnce();
+    });
+  }
+
+  // ── Матрица строго через Яндекс
+  async function buildDurationMatrixStrict(points){
+    const n = points.length;
+    const M = Array.from({length:n}, ()=>Array(n).fill(0));
+    for(let i=0;i<n;i++){
+      for(let j=0;j<n;j++){
+        if(i===j) continue;
+        const sec = await getDurationStrict(points[i], points[j]);
+        M[i][j] = sec;
+      }
+    }
+    return M;
+  }
+
+  // ── NN строго через Яндекс: на шаге проверяем k ближайших по геометрии
+  async function buildRouteNearestNeighborStrict(points, {k=8}={}){
+    const remaining = new Set(points.map((_,i)=>i));
+    let cur = 0;
+    const order = [cur]; remaining.delete(cur);
+    const legs = [0.0];
+
+    while(remaining.size){
+      // k кандидатов по геометрии
+      const cand = [...remaining].map(j=>{
+        const d2 = (points[cur].lat-points[j].lat)**2 + (points[cur].lon-points[j].lon)**2;
+        return {j,d2};
+      }).sort((a,b)=>a.d2-b.d2).slice(0, Math.min(k, remaining.size));
+
+      // длительности по Яндексу последовательно (через очередь)
+      let bestJ = cand[0].j, bestSec = Infinity;
+      for(const {j} of cand){
+        const sec = await getDurationStrict(points[cur], points[j]);
+        if(sec < bestSec){ bestSec=sec; bestJ=j; }
+      }
+      order.push(bestJ); remaining.delete(bestJ); legs.push(bestSec); cur = bestJ;
+    }
+    return { orderedPoints: order.map(i=>points[i]), legsSec: legs, order };
   }
 })();
 </script>
