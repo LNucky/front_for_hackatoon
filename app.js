@@ -189,45 +189,41 @@ class RoutePlanner {
     }
 
     createRoutePolyline(route, type) {
-        const coordinates = route.map(point => [point.lon, point.lat]);
-        const polyline = new ymaps.Polyline(
-            coordinates,
-            {},
-            {
-                strokeColor: type === 'smart' ? '#5ac8fa' : '#ff6b6b',
-                strokeWidth: 4,
-                strokeOpacity: 0.7
-            }
-        );
-
-        this.map.geoObjects.add(polyline);
-        if (type === 'smart') {
-            this.routePolyline = polyline;
+    const coordinates = route.map(point => [point.lat, point.lon]); // <-- было [lon, lat]
+    const polyline = new ymaps.Polyline(
+        coordinates,
+        {},
+        {
+        strokeColor: type === 'smart' ? '#5ac8fa' : '#ff6b6b',
+        strokeWidth: 4,
+        strokeOpacity: 0.7
         }
+    );
+    this.map.geoObjects.add(polyline);
+    if (type === 'smart') this.routePolyline = polyline;
     }
 
     addPointsToMap(route) {
         this.objectManager.removeAll();
-
         route.forEach((point, index) => {
             this.objectManager.add({
-                id: index,
-                type: 'Feature',
-                geometry: {
-                    type: 'Point',
-                    coordinates: [point.lon, point.lat]
-                },
-                properties: {
-                    balloonContent: `
-                        <div style="padding: 8px;">
-                            <strong>Точка ${index + 1}</strong><br/>
-                            ${point.address}<br/>
-                            <small>Время: ${point.arrival_time || 'N/A'}</small>
-                        </div>
-                    `,
-                    clusterCaption: `Точка ${index + 1}`,
-                    hintContent: point.address
-                }
+            id: index,
+            type: 'Feature',
+            geometry: {
+                type: 'Point',
+                coordinates: [point.lat, point.lon] // <-- было [lon, lat]
+            },
+            properties: {
+                balloonContent: `
+                <div style="padding: 8px;">
+                    <strong>Точка ${index + 1}</strong><br/>
+                    ${point.address}<br/>
+                    <small>Время: ${point.arrival_time || 'N/A'}</small>
+                </div>
+                `,
+                clusterCaption: `Точка ${index + 1}`,
+                hintContent: point.address
+            }
             });
         });
     }
