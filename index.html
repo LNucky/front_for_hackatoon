@@ -41,10 +41,19 @@
                         <input type="checkbox" id="mockMode" />
                         <span>Тестовый режим</span>
                     </label>
-                    <input id="apiBase" class="control-input" placeholder="http://localhost:8000" value="http://localhost:8000" />
+                    <input id="apiBase" class="control-input" placeholder="https://hackatoon-production.up.railway.app" value="https://hackatoon-production.up.railway.app" />
                     <div id="httpsWarn" class="warn-message hidden">
                         ⚠️ HTTPS страница + HTTP бэкенд = ошибка. Используйте HTTPS или ngrok.
                     </div>
+                </div>
+
+                <div class="control-group">
+                    <label class="control-label">🔑 Ключ API 2ГИС</label>
+                    <input id="dgisApiKey" class="control-input" type="password" placeholder="Введите ключ API 2ГИС" />
+                    <div class="small" style="margin-top: 4px;">
+                        Получите ключ на <a href="https://dev.2gis.com/" target="_blank" style="color: var(--accent);">dev.2gis.com</a>
+                    </div>
+                    <div id="apiKeyStatus" class="small" style="margin-top: 4px;"></div>
                 </div>
 
                 <div class="btn-group-vertical">

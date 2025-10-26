@@ -26,6 +26,8 @@ class RoutePlanner {
         this.mockMode = document.getElementById('mockMode');
         this.apiBaseInput = document.getElementById('apiBase');
         this.httpsWarn = document.getElementById('httpsWarn');
+        this.dgisApiKeyInput = document.getElementById('dgisApiKey');
+        this.apiKeyStatus = document.getElementById('apiKeyStatus');
         this.startTime = document.getElementById('startTime');
         this.lunchBreak = document.getElementById('lunchBreak');
         this.considerTraffic = document.getElementById('considerTraffic');
@@ -46,8 +48,10 @@ class RoutePlanner {
         this.compareResults = document.getElementById('compareResults');
         this.improvementValue = document.getElementById('improvementValue');
 
-        this.apiBaseInput.value = localStorage.getItem('apiBase') || 'http://localhost:8000';
+        this.apiBaseInput.value = localStorage.getItem('apiBase') || 'https://hackatoon-production.up.railway.app';
+        this.dgisApiKeyInput.value = localStorage.getItem('dgisApiKey') || '';
         this.checkHttpsMixed();
+        this.validateApiKey();
 
         this.switchTab('smart');
     }
@@ -118,6 +122,11 @@ class RoutePlanner {
         this.apiBaseInput.addEventListener('change', () => {
             localStorage.setItem('apiBase', this.apiBaseInput.value.trim());
             this.checkHttpsMixed();
+        });
+
+        this.dgisApiKeyInput.addEventListener('input', () => {
+            localStorage.setItem('dgisApiKey', this.dgisApiKeyInput.value.trim());
+            this.validateApiKey();
         });
     }
 
@@ -254,27 +263,16 @@ class RoutePlanner {
     }
 
     async processRealOptimization(type, file) {
-        this.logMessage('📖 Чтение адресов из файла...');
-        const addresses = await this.readAddressesFromFile(file);
-
-        if (addresses.length === 0) {
-            throw new Error('Не найдены адреса в файле');
+        this.logMessage('📖 Отправка файла на сервер для обработки...');
+        
+        // Проверяем наличие API ключа
+        const apiKey = this.dgisApiKeyInput.value.trim();
+        if (!apiKey) {
+            throw new Error('Необходимо указать ключ API 2ГИС');
         }
 
-        this.logMessage(`📍 Найдено ${addresses.length} адресов. Геокодирование...`);
-        this.geocodedAddresses = await this.geocodeAddresses(addresses);
-
-        if (this.geocodedAddresses.length === 0) {
-            throw new Error('Не удалось геокодировать адреса');
-        }
-
-        this.logMessage(`🎯 Успешно геокодировано ${this.geocodedAddresses.length} адресов`);
-
-        this.logMessage('🔄 Построение матрицы длительностей...');
-        const timeMatrix = await this.buildTimeMatrix(this.geocodedAddresses);
-
-        this.logMessage('⚡ Оптимизация маршрута...');
-        const result = await this.sendToBackendForOptimization(this.geocodedAddresses, timeMatrix, type);
+        this.logMessage('⚡ Оптимизация маршрута с использованием 2ГИС API...');
+        const result = await this.sendToBackendForOptimization(null, null, type);
 
         this.handleOptimizationResult(result, type);
     }
@@ -410,25 +408,35 @@ class RoutePlanner {
 
     async sendToBackendForOptimization(points, timeMatrix, type) {
         const base = this.apiBaseInput.value.trim();
+        const apiKey = this.dgisApiKeyInput.value.trim();
 
-        const requestData = {
-            points: points,
-            time_matrix: timeMatrix,
-            start_time: this.startTime.value,
-            lunch_break: this.lunchBreak.value,
-            visit_duration: parseInt(this.visitDuration.value) || 30,
-            consider_traffic: this.considerTraffic.checked,
-            algorithm: type
-        };
+        // Проверяем наличие API ключа
+        if (!apiKey) {
+            throw new Error('Необходимо указать ключ API 2ГИС');
+        }
 
-        this.logMessage('📡 Отправка данных на сервер...');
+        // Используем новый endpoint с передачей файла и API ключа
+        this.logMessage('📡 Отправка данных на сервер (новый API 2ГИС)...');
 
-        const response = await fetch(`${base}/api/optimize`, {
+        // Создаем FormData для отправки файла
+        const formData = new FormData();
+        const file = this.fileInput.files?.[0];
+        if (!file) {
+            throw new Error('Файл не найден');
+        }
+        formData.append('file', file);
+
+        // Параметры запроса
+        const params = new URLSearchParams({
+            dgis_api_key: apiKey,
+            work_start: this.startTime.value,
+            work_end: this.getWorkEndTime(),
+            meeting_minutes: parseInt(this.visitDuration.value) || 30
+        });
+
+        const response = await fetch(`${base}/api/optimize_2gis?${params}`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(requestData)
+            body: formData
         });
 
         if (!response.ok) {
@@ -436,7 +444,38 @@ class RoutePlanner {
             throw new Error(`HTTP ${response.status}: ${errorText}`);
         }
 
-        return await response.json();
+        const result = await response.json();
+        
+        // Преобразуем результат в формат, ожидаемый фронтендом
+        return this.convertApiResult(result);
+    }
+
+    getWorkEndTime() {
+        const startTime = this.startTime.value;
+        const [hours, minutes] = startTime.split(':').map(Number);
+        const endHours = (hours + 9) % 24; // Добавляем 9 часов к началу работы
+        return `${endHours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+    }
+
+    convertApiResult(apiResult) {
+        // Преобразуем результат нового API в формат, ожидаемый фронтендом
+        const route = apiResult.route.map((point, index) => ({
+            address: point.address,
+            lat: point.lat || 0,
+            lon: point.lon || 0,
+            arrival_time: point.eta,
+            duration: point.service_min || 30
+        }));
+
+        return {
+            route: route,
+            summary: {
+                total_time_min: apiResult.summary.drive_min,
+                visits: apiResult.summary.visits,
+                late: apiResult.summary.late,
+                late_penalty: apiResult.summary.late_penalty
+            }
+        };
     }
 
     handleOptimizationResult(result, type) {
@@ -717,6 +756,51 @@ class RoutePlanner {
         const isHttps = window.location.protocol === 'https:';
         const isHttpBackend = this.apiBaseInput.value.startsWith('http://');
         this.httpsWarn.classList.toggle('hidden', !(isHttps && isHttpBackend));
+    }
+
+    async validateApiKey() {
+        const apiKey = this.dgisApiKeyInput.value.trim();
+        
+        if (!apiKey) {
+            this.apiKeyStatus.textContent = '';
+            this.apiKeyStatus.style.color = '';
+            return;
+        }
+
+        // Базовая валидация формата UUID
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(apiKey)) {
+            this.apiKeyStatus.textContent = '❌ Неверный формат ключа';
+            this.apiKeyStatus.style.color = 'var(--err)';
+            return;
+        }
+
+        this.apiKeyStatus.textContent = '🔄 Проверка ключа...';
+        this.apiKeyStatus.style.color = 'var(--warn)';
+
+        try {
+            const base = this.apiBaseInput.value.trim();
+            const response = await fetch(`${base}/api/validate_dgis_key?dgis_api_key=${encodeURIComponent(apiKey)}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+
+            const result = await response.json();
+            
+            if (result.valid) {
+                this.apiKeyStatus.textContent = '✅ Ключ валиден';
+                this.apiKeyStatus.style.color = 'var(--ok)';
+            } else {
+                this.apiKeyStatus.textContent = `❌ ${result.error}`;
+                this.apiKeyStatus.style.color = 'var(--err)';
+            }
+        } catch (error) {
+            this.apiKeyStatus.textContent = '❌ Ошибка проверки ключа';
+            this.apiKeyStatus.style.color = 'var(--err)';
+            console.error('Ошибка валидации API ключа:', error);
+        }
     }
 }
 
