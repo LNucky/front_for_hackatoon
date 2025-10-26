@@ -249,6 +249,11 @@ class RoutePlanner {
             if (this.mockMode.checked) {
                 const result = await this.generateMockResult(type);
                 this.handleOptimizationResult(result, type);
+                
+                // ДОБАВЛЕНО: вывод text_report в журнал
+                if (result.text_report) {
+                    this.logMessage(result.text_report);
+                }
             } else {
                 await this.processRealOptimization(type, file);
             }
@@ -275,6 +280,11 @@ class RoutePlanner {
         const result = await this.sendToBackendForOptimization(null, null, type);
 
         this.handleOptimizationResult(result, type);
+        
+        // ДОБАВЛЕНО: вывод text_report в журнал
+        if (result.text_report) {
+            this.logMessage(result.text_report);
+        }
     }
 
     async readAddressesFromFile(file) {
